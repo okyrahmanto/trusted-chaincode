@@ -7,11 +7,13 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
-/*
+const index = "agentID~TransactionID"
+
 // SmartContract provides functions for managing a car
 type SmartContract struct {
 	contractapi.Contract
@@ -25,10 +27,77 @@ type Car struct {
 	Owner  string `json:"owner"`
 }
 
+type TransactionAgent struct {
+	TransactionID    string `json:"TransactionID"` //uuid
+	AgentID          string `json:"AgentID"`
+	Timestamp        string `json:"Timestamp"`
+	RefTransactionID string `json:"RefTransactionID"` //uuid
+	Source           string `json:"Source"`
+	Destination      string `json:"Destination"`
+	MessageType      string `json:"MessageType"` // messagetype : request, response. forward
+	Data             string `json:"Data"`
+}
+
+type Agent struct {
+	AgentID      string `json:"AgentID"`
+	DeviceID     string `json:"DeviceID"`
+	SubcribePath string `json:"SubcribePath"`
+	TrustValue   string `json:"TrustValue"`
+	Tolerance    string `json:"Tolerance"`
+}
+
+type Rating struct {
+	RatingID       string `json:"RatingID"` //uuid
+	AgentID        string `json:"AgentID"`
+	AgentIDTrustee string `json:"AgentIDTrustee"`
+	Value          string `json:"Value"`
+	Reputation     string `json:"Reputation"` // rep : good | bad
+}
+
+type EvaluationParam struct {
+	EvaluationID  string `json:"EvaluationID"` //uuid
+	TransactionID string `json:"TransactionID"`
+	AgentID       string `json:"AgentID"`
+	TrusterID     string `json:"TrusterID"`
+	TrusteeID     string `json:"TrusteeID"`
+	Timestamp     string `json:"Timestamp"`
+	ResponseTime  string `json:"ResponseTime"`
+	Validity      string `json:"Validity"`
+	Correctness   string `json:"Correctness"`
+	Cooperation   string `json:"Cooperation"`
+	Qos           string `json:"Qos"`
+	Availability  string `json:"Availability"`
+	Confidence    string `json:"Confidence"`
+}
+
 // QueryResult structure used for handling result of query
 type QueryResult struct {
 	Key    string `json:"Key"`
 	Record *Car
+}
+
+// QueryResult structure used for handling result of query
+type QueryResultAgent struct {
+	Key    string `json:"Key"`
+	Record *Agent
+}
+
+// QueryResult structure used for handling result of query
+type QueryResultTransaction struct {
+	Key    string `json:"Key"`
+	Record *TransactionAgent
+}
+
+// QueryResult structure used for handling result of query
+type QueryResultRatings struct {
+	Key    string `json:"Key"`
+	Record *Rating
+}
+
+// QueryResult structure used for handling result of query
+type QueryResultEvaluation struct {
+	Key    string `json:"Key"`
+	Record *EvaluationParam
 }
 
 // InitLedger adds a base set of cars to the ledger
@@ -57,6 +126,500 @@ func (s *SmartContract) InitLedger(ctx contractapi.TransactionContextInterface) 
 
 	return nil
 }
+
+// InitLedger adds a base set of cars to the ledger
+func (s *SmartContract) InitLedgerTrans(ctx contractapi.TransactionContextInterface) error {
+	//use concat
+	tAgents := []TransactionAgent{
+		{TransactionID: "tr01",
+			AgentID:     "az01",
+			Timestamp:   "001",
+			Source:      "11",
+			Destination: "32",
+			MessageType: "21",
+			Data:        "123"},
+		{TransactionID: "tr02",
+			AgentID:     "az02",
+			Timestamp:   "32",
+			Source:      "321",
+			Destination: "3213",
+			MessageType: "31",
+			Data:        "3123"},
+		{TransactionID: "tr03",
+			AgentID:     "az01",
+			Timestamp:   "001",
+			Source:      "11",
+			Destination: "32",
+			MessageType: "21",
+			Data:        "123"},
+		{TransactionID: "tr04",
+			AgentID:     "az02",
+			Timestamp:   "32",
+			Source:      "321",
+			Destination: "3213",
+			MessageType: "31",
+			Data:        "3123"},
+	}
+
+	for i, tAgent := range tAgents {
+		tAgentAsBytes, _ := json.Marshal(tAgent)
+		err := ctx.GetStub().PutState("tAgent"+strconv.Itoa(i), tAgentAsBytes)
+
+		if err != nil {
+			return fmt.Errorf("Failed to put to world state. %s", err.Error())
+		}
+	}
+
+	return nil
+}
+
+// TRANSACTION AGENT
+
+// Query returns the single transaction Agent stored in the world state with given id
+func (s *SmartContract) QueryTransactionAgent(ctx contractapi.TransactionContextInterface, transactionID string) (*TransactionAgent, error) {
+	tAgentAsBytes, err := ctx.GetStub().GetState(transactionID)
+
+	if err != nil {
+		return nil, fmt.Errorf("Failed to read from world state. %s", err.Error())
+	}
+
+	if tAgentAsBytes == nil {
+		return nil, fmt.Errorf("%s does not exist", transactionID)
+	}
+
+	tAgent := new(TransactionAgent)
+	_ = json.Unmarshal(tAgentAsBytes, tAgent)
+
+	return tAgent, nil
+}
+
+// Create Transsaction With Reference of Agent
+func (s *SmartContract) CreateTransactionAgent(ctx contractapi.TransactionContextInterface, TransactionID string, AgentID string, Timestamp string, RefTransactionID string, Source string, Destination string, MessageType string, Data string) error {
+
+	tAgent := TransactionAgent{
+		TransactionID:    TransactionID,
+		AgentID:          AgentID,
+		Timestamp:        Timestamp,
+		RefTransactionID: RefTransactionID,
+		Source:           Source,
+		Destination:      Destination,
+		MessageType:      MessageType,
+		Data:             Data}
+
+	tAgentAsBytes, _ := json.Marshal(tAgent)
+	err := ctx.GetStub().PutState(TransactionID, tAgentAsBytes)
+	if err != nil {
+		return err
+	}
+	//create composite key by type asset i.e trxAgent-TransactionID
+	idTrxAgentKey, err := ctx.GetStub().CreateCompositeKey(index, []string{tAgent.AgentID, tAgent.TransactionID})
+	if err != nil {
+		return err
+	}
+	value := []byte{0x00}
+	return ctx.GetStub().PutState(idTrxAgentKey, value)
+
+}
+
+// returned list of transaction
+func (t *SmartContract) GetTransactionByAgent(ctx contractapi.TransactionContextInterface, AgentID string) ([]QueryResultTransaction, error) {
+	// Execute a key range query on all keys starting with 'color'
+	//coloredAssetResultsIterator, err := ctx.GetStub().GetStateByPartialCompositeKey(index, []string{color})
+	coloredAssetResultsIterator, err := ctx.GetStub().GetStateByPartialCompositeKey(index, []string{AgentID})
+	if err != nil {
+		return nil, err
+	}
+	defer coloredAssetResultsIterator.Close()
+
+	results := []QueryResultTransaction{}
+
+	for coloredAssetResultsIterator.HasNext() {
+		responseRange, err := coloredAssetResultsIterator.Next()
+		if err != nil {
+			return nil, err
+		}
+
+		_, compositeKeyParts, err := ctx.GetStub().SplitCompositeKey(responseRange.Key)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(compositeKeyParts) > 1 {
+			returnedAssetID := compositeKeyParts[1]
+			asset, err := t.QueryTransactionAgent(ctx, returnedAssetID)
+			if err != nil {
+				return nil, err
+			}
+
+			QueryResultTransaction := QueryResultTransaction{Key: responseRange.Key, Record: asset}
+			results = append(results, QueryResultTransaction)
+			/*asset.Owner = newOwner
+			assetBytes, err := json.Marshal(asset)
+			if err != nil {
+				return err
+			}
+			err = ctx.GetStub().PutState(returnedAssetID, assetBytes)
+			if err != nil {
+				return fmt.Errorf("transfer failed for asset %s: %v", returnedAssetID, err)
+			}
+			*/
+		}
+
+	}
+
+	return results, nil
+}
+
+// AGENT
+
+func (s *SmartContract) CreateAgent(ctx contractapi.TransactionContextInterface, AgentID string, DeviceID string, SubcribePath string, TrustValue string, Tolerance string) error {
+
+	agent := Agent{
+		AgentID:      AgentID,
+		DeviceID:     DeviceID,
+		SubcribePath: SubcribePath,
+		TrustValue:   TrustValue,
+		Tolerance:    Tolerance,
+	}
+
+	agentAsBytes, _ := json.Marshal(agent)
+
+	err := ctx.GetStub().PutState(AgentID, agentAsBytes)
+	if err != nil {
+		return err
+	}
+	//create composite key by type asset i.e deviceID-agentID
+	idDeviceAgentKey, err := ctx.GetStub().CreateCompositeKey(index, []string{agent.DeviceID, agent.AgentID})
+	if err != nil {
+		return err
+	}
+	value := []byte{0x00}
+	return ctx.GetStub().PutState(idDeviceAgentKey, value)
+}
+
+// QueryCar returns the car stored in the world state with given id
+func (s *SmartContract) QueryAgent(ctx contractapi.TransactionContextInterface, AgentID string) (*Agent, error) {
+	agentAsBytes, err := ctx.GetStub().GetState(AgentID)
+
+	if err != nil {
+		return nil, fmt.Errorf("Failed to read from world state. %s", err.Error())
+	}
+
+	if agentAsBytes == nil {
+		return nil, fmt.Errorf("%s does not exist", AgentID)
+	}
+
+	agent := new(Agent)
+	_ = json.Unmarshal(agentAsBytes, agent)
+
+	return agent, nil
+}
+
+func (s *SmartContract) UpdateAgent(ctx contractapi.TransactionContextInterface, AgentID string, DeviceID string, SubcribePath string, TrustValue string, Tolerance string) error {
+	agent, err := s.QueryAgent(ctx, AgentID)
+
+	if err != nil {
+		return err
+	}
+
+	agent.SubcribePath = SubcribePath
+	agent.Tolerance = Tolerance
+	agent.TrustValue = TrustValue
+
+	agentAsBytes, _ := json.Marshal(agent)
+
+	return ctx.GetStub().PutState(AgentID, agentAsBytes)
+}
+
+func (t *SmartContract) GetAgentByDevice(ctx contractapi.TransactionContextInterface, DeviceID string) ([]QueryResultAgent, error) {
+
+	coloredAssetResultsIterator, err := ctx.GetStub().GetStateByPartialCompositeKey(index, []string{DeviceID})
+	if err != nil {
+		return nil, err
+	}
+	defer coloredAssetResultsIterator.Close()
+
+	results := []QueryResultAgent{}
+
+	for coloredAssetResultsIterator.HasNext() {
+		responseRange, err := coloredAssetResultsIterator.Next()
+		if err != nil {
+			return nil, err
+		}
+
+		_, compositeKeyParts, err := ctx.GetStub().SplitCompositeKey(responseRange.Key)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(compositeKeyParts) > 1 {
+			returnedAssetID := compositeKeyParts[1]
+			asset, err := t.QueryAgent(ctx, returnedAssetID)
+			if err != nil {
+				return nil, err
+			}
+
+			QueryResultAgent := QueryResultAgent{Key: responseRange.Key, Record: asset}
+			results = append(results, QueryResultAgent)
+		}
+
+	}
+
+	return results, nil
+}
+
+// RATINGS
+
+// Create Transsaction With Reference of Agent
+func (s *SmartContract) CreateRatingAgent(ctx contractapi.TransactionContextInterface, RatingID string, AgentID string, AgentIDTrustee string, Value string, Reputation string) error {
+
+	rAgent := Rating{
+		RatingID:       RatingID,
+		AgentID:        AgentID,
+		AgentIDTrustee: AgentIDTrustee,
+		Value:          Value,
+		Reputation:     Reputation,
+	}
+
+	rAgentAsBytes, _ := json.Marshal(rAgent)
+	err := ctx.GetStub().PutState(RatingID, rAgentAsBytes)
+	if err != nil {
+		return err
+	}
+	//create composite key by type asset i.e trxAgent-TransactionID
+	idRtxAgentKey, err := ctx.GetStub().CreateCompositeKey(index, []string{rAgent.AgentID, rAgent.RatingID})
+	if err != nil {
+		return err
+	}
+	value := []byte{0x00}
+	return ctx.GetStub().PutState(idRtxAgentKey, value)
+
+}
+
+// Query returns the single Rating Agent stored in the world state with given id
+func (s *SmartContract) QueryRatingAgent(ctx contractapi.TransactionContextInterface, RatingID string) (*Rating, error) {
+	rAgentAsBytes, err := ctx.GetStub().GetState(RatingID)
+
+	if err != nil {
+		return nil, fmt.Errorf("Failed to read from world state. %s", err.Error())
+	}
+
+	if rAgentAsBytes == nil {
+		return nil, fmt.Errorf("%s does not exist", RatingID)
+	}
+
+	rAgent := new(Rating)
+	_ = json.Unmarshal(rAgentAsBytes, rAgent)
+
+	return rAgent, nil
+}
+
+// returned list of transaction
+func (t *SmartContract) GetRatingByAgent(ctx contractapi.TransactionContextInterface, AgentID string) ([]QueryResultRatings, error) {
+
+	coloredAssetResultsIterator, err := ctx.GetStub().GetStateByPartialCompositeKey(index, []string{AgentID})
+	if err != nil {
+		return nil, err
+	}
+	defer coloredAssetResultsIterator.Close()
+
+	results := []QueryResultRatings{}
+
+	for coloredAssetResultsIterator.HasNext() {
+		responseRange, err := coloredAssetResultsIterator.Next()
+		if err != nil {
+			return nil, err
+		}
+
+		_, compositeKeyParts, err := ctx.GetStub().SplitCompositeKey(responseRange.Key)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(compositeKeyParts) > 1 {
+			returnedAssetID := compositeKeyParts[1]
+			asset, err := t.QueryRatingAgent(ctx, returnedAssetID)
+			if err != nil {
+				return nil, err
+			}
+
+			QueryResultRatings := QueryResultRatings{Key: responseRange.Key, Record: asset}
+			results = append(results, QueryResultRatings)
+			/*asset.Owner = newOwner
+			assetBytes, err := json.Marshal(asset)
+			if err != nil {
+				return err
+			}
+			err = ctx.GetStub().PutState(returnedAssetID, assetBytes)
+			if err != nil {
+				return fmt.Errorf("transfer failed for asset %s: %v", returnedAssetID, err)
+			}
+			*/
+		}
+
+	}
+
+	return results, nil
+}
+
+// EVALUATION PARAMETER
+
+// Create Transsaction With Reference of Agent
+func (s *SmartContract) CreateEvaluationAgent(ctx contractapi.TransactionContextInterface, EvaluationID string, TransactionID string, AgentID string, Timestamp string, TrusterID string, TrusteeID string, ResponseTime string, Validity string, Correctness string, Cooperation string, Qos string, Availability string, Confidence string) error {
+
+	evaluationParam := EvaluationParam{
+		EvaluationID:  EvaluationID, //uuid
+		TransactionID: TransactionID,
+		AgentID:       AgentID,
+		TrusterID:     TrusterID,
+		TrusteeID:     TrusteeID,
+		Timestamp:     Timestamp,
+		ResponseTime:  ResponseTime,
+		Validity:      Validity,
+		Correctness:   Correctness,
+		Cooperation:   Cooperation,
+		Qos:           Qos,
+		Availability:  Availability,
+		Confidence:    Confidence,
+	}
+
+	evaluationParamAsBytes, _ := json.Marshal(evaluationParam)
+	err := ctx.GetStub().PutState(EvaluationID, evaluationParamAsBytes)
+	if err != nil {
+		return err
+	}
+	//create composite key by type asset i.e trxAgent-EvaluationID
+	idRtxAgentKey, err := ctx.GetStub().CreateCompositeKey(index, []string{evaluationParam.AgentID, evaluationParam.EvaluationID})
+	if err != nil {
+		return err
+	}
+	value := []byte{0x00}
+	err = ctx.GetStub().PutState(idRtxAgentKey, value)
+	if err != nil {
+		return err
+	}
+	idEvaTransactionKey, err := ctx.GetStub().CreateCompositeKey(index, []string{evaluationParam.TransactionID, evaluationParam.EvaluationID})
+	if err != nil {
+		return err
+	}
+
+	err = ctx.GetStub().PutState(idEvaTransactionKey, value)
+	if err != nil {
+		return err
+	}
+	idTrustorTransactionKey, err := ctx.GetStub().CreateCompositeKey(index, []string{evaluationParam.TrusterID, evaluationParam.EvaluationID})
+	if err != nil {
+		return err
+	}
+	//value := []byte{0x00}
+	err = ctx.GetStub().PutState(idTrustorTransactionKey, value)
+	if err != nil {
+		return err
+	}
+	idTrusteeTransactionKey, err := ctx.GetStub().CreateCompositeKey(index, []string{evaluationParam.TrusteeID, evaluationParam.EvaluationID})
+	if err != nil {
+		return err
+	}
+	//value := []byte{0x00}
+	return ctx.GetStub().PutState(idTrusteeTransactionKey, value)
+
+}
+
+// Query returns the single Rating Agent stored in the world state with given id
+func (s *SmartContract) QueryEvaluationAgent(ctx contractapi.TransactionContextInterface, EvaluationID string) (*EvaluationParam, error) {
+	evaluationParamAsBytes, err := ctx.GetStub().GetState(EvaluationID)
+
+	if err != nil {
+		return nil, fmt.Errorf("Failed to read from world state. %s", err.Error())
+	}
+
+	if evaluationParamAsBytes == nil {
+		return nil, fmt.Errorf("%s does not exist", EvaluationID)
+	}
+
+	evaluationParam := new(EvaluationParam)
+	_ = json.Unmarshal(evaluationParamAsBytes, evaluationParam)
+
+	return evaluationParam, nil
+}
+
+// returned list of transaction by agent
+func (t *SmartContract) GetEvaluationByAgent(ctx contractapi.TransactionContextInterface, AgentID string) ([]QueryResultEvaluation, error) {
+
+	coloredAssetResultsIterator, err := ctx.GetStub().GetStateByPartialCompositeKey(index, []string{AgentID})
+	if err != nil {
+		return nil, err
+	}
+	defer coloredAssetResultsIterator.Close()
+
+	results := []QueryResultEvaluation{}
+
+	for coloredAssetResultsIterator.HasNext() {
+		responseRange, err := coloredAssetResultsIterator.Next()
+		if err != nil {
+			return nil, err
+		}
+
+		_, compositeKeyParts, err := ctx.GetStub().SplitCompositeKey(responseRange.Key)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(compositeKeyParts) > 1 {
+			returnedAssetID := compositeKeyParts[1]
+			asset, err := t.QueryEvaluationAgent(ctx, returnedAssetID)
+			if err != nil {
+				return nil, err
+			}
+
+			QueryResultEvaluation := QueryResultEvaluation{Key: responseRange.Key, Record: asset}
+			results = append(results, QueryResultEvaluation)
+		}
+
+	}
+
+	return results, nil
+}
+
+// returned list of transaction by transaction
+func (t *SmartContract) GetEvaluationByTransaction(ctx contractapi.TransactionContextInterface, TransactionID string) ([]QueryResultEvaluation, error) {
+
+	coloredAssetResultsIterator, err := ctx.GetStub().GetStateByPartialCompositeKey(index, []string{TransactionID})
+	if err != nil {
+		return nil, err
+	}
+	defer coloredAssetResultsIterator.Close()
+
+	results := []QueryResultEvaluation{}
+
+	for coloredAssetResultsIterator.HasNext() {
+		responseRange, err := coloredAssetResultsIterator.Next()
+		if err != nil {
+			return nil, err
+		}
+
+		_, compositeKeyParts, err := ctx.GetStub().SplitCompositeKey(responseRange.Key)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(compositeKeyParts) > 1 {
+			returnedAssetID := compositeKeyParts[1]
+			asset, err := t.QueryEvaluationAgent(ctx, returnedAssetID)
+			if err != nil {
+				return nil, err
+			}
+
+			QueryResultEvaluation := QueryResultEvaluation{Key: responseRange.Key, Record: asset}
+			results = append(results, QueryResultEvaluation)
+		}
+
+	}
+
+	return results, nil
+}
+
+// ##########################################################
 
 // CreateCar adds a new car to the world state with given details
 func (s *SmartContract) CreateCar(ctx contractapi.TransactionContextInterface, carNumber string, make string, model string, colour string, owner string) error {
@@ -134,547 +697,6 @@ func (s *SmartContract) ChangeCarOwner(ctx contractapi.TransactionContextInterfa
 	carAsBytes, _ := json.Marshal(car)
 
 	return ctx.GetStub().PutState(carNumber, carAsBytes)
-}
-
-func main() {
-
-	chaincode, err := contractapi.NewChaincode(new(SmartContract))
-
-	if err != nil {
-		fmt.Printf("Error create fabcar chaincode: %s", err.Error())
-		return
-	}
-
-	if err := chaincode.Start(); err != nil {
-		fmt.Printf("Error starting fabcar chaincode: %s", err.Error())
-	}
-}
-*/
-
-// SmartContract provides functions for managing an Asset
-type SmartContract struct {
-	contractapi.Contract
-}
-
-// Asset describes basic details of what makes up a simple asset
-type Asset struct {
-	AgentID        string `json:"AgentID"`
-	DeviceID       string `json:"DeviceID"`
-	SubcribePath   string `json:"SubcribePath"`
-	TrustValue     string `json:"TrustValue"`
-	AppraisedValue string `json:"AppraisedValue"`
-}
-
-type Agent struct {
-	AgentID      string             `json:"AgentID"`
-	DeviceID     string             `json:"DeviceID"`
-	SubcribePath string             `json:"SubcribePath"`
-	TrustValue   string             `json:"TrustValue"`
-	Tolerance    string             `json:"Tolerance"`
-	Transaction  []TransactionAgent `json:"TransactionAgent"`
-	Ratings      []Rating           `json:"Rating"`
-}
-
-type TransactionAgent struct {
-	TransactionID string `json:"TransactionID"`
-	Timestamp     string `json:"Timestamp"`
-	Source        string `json:"Source"`
-	Destination   string `json:"Destination"`
-	MessageType   string `json:"MessageType"` // messagetype : request, response. forward
-	Data          string `json:"Data"`
-}
-
-type Rating struct {
-	AgentID    string `json:"AgentID"`
-	Value      string `json:"Value"`
-	Reputation string `json:"Reputation"` // rep : good | bad
-}
-
-// CreateAsset issues a new asset to the world state with given details.
-func (s *SmartContract) CreateAgent(ctx contractapi.TransactionContextInterface, agentID string, deviceID string, subcribePath string, trustValue string, tolerance string) error {
-	exists, err := s.AgentExists(ctx, agentID)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return fmt.Errorf("the agent %s already exists", agentID)
-	}
-
-	tAgent := []TransactionAgent{
-		{TransactionID: "nil",
-			Timestamp:   "",
-			Source:      "",
-			Destination: "",
-			MessageType: "",
-			Data:        ""},
-	}
-
-	rAgent := []Rating{
-
-		{AgentID: "nil",
-			Value:      "",
-			Reputation: ""},
-	}
-
-	asset := Agent{
-		AgentID:      agentID,
-		DeviceID:     deviceID,
-		SubcribePath: subcribePath,
-		TrustValue:   trustValue,
-		Tolerance:    tolerance,
-		Transaction:  tAgent,
-		Ratings:      rAgent,
-	}
-	assetJSON, err := json.Marshal(asset)
-	if err != nil {
-		return err
-	}
-
-	return ctx.GetStub().PutState(agentID, assetJSON)
-}
-
-// CreateAsset issues a new asset to the world state with given details.
-func (s *SmartContract) UpdateAgent(ctx contractapi.TransactionContextInterface, agentID string, deviceID string, subcribePath string, trustValue string, tolerance string) error {
-	exists, err := s.AgentExists(ctx, agentID)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return fmt.Errorf("the agent %s not exists", agentID)
-	}
-
-	agent, err := s.GetAgent(ctx, agentID)
-	if err != nil {
-		return err
-	}
-
-	agent.SubcribePath = subcribePath
-	agent.TrustValue = trustValue
-	agent.Tolerance = tolerance
-	agentJSON, err := json.Marshal(agent)
-	if err != nil {
-		return err
-	}
-
-	return ctx.GetStub().PutState(agentID, agentJSON)
-}
-
-// AssetExists returns true when asset with given ID exists in world state
-func (s *SmartContract) AgentExists(ctx contractapi.TransactionContextInterface, id string) (bool, error) {
-	assetJSON, err := ctx.GetStub().GetState(id)
-	if err != nil {
-		return false, fmt.Errorf("failed to read from world state: %v", err)
-	}
-
-	return assetJSON != nil, nil
-}
-
-// ReadAsset returns the asset stored in the world state with given id.
-func (s *SmartContract) GetAgent(ctx contractapi.TransactionContextInterface, id string) (*Agent, error) {
-	assetJSON, err := ctx.GetStub().GetState(id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read from world state: %v", err)
-	}
-	if assetJSON == nil {
-		return nil, fmt.Errorf("the asset %s does not exist", id)
-	}
-
-	var agent Agent
-	err = json.Unmarshal(assetJSON, &agent)
-	if err != nil {
-		return nil, err
-	}
-
-	return &agent, nil
-}
-
-func (s *SmartContract) AddTransactionAgent(ctx contractapi.TransactionContextInterface, id string, timestamp string, source string, destination string, messageType string, data string) error {
-	/*assetJSON, err := ctx.GetStub().GetState(id)
-	if err != nil {
-		return fmt.Errorf("failed to read from world state: %v", err)
-	}
-	if assetJSON == nil {
-		return fmt.Errorf("the asset %s does not exist", id)
-	}
-
-	var agent Agent
-	err = json.Unmarshal(assetJSON, &agent)
-	if err != nil {
-		return err
-	}*/
-
-	agent, err := s.GetAgent(ctx, id)
-	if err != nil {
-		return err
-	}
-
-	/*assetJSON, err := ctx.GetStub().GetState(id)
-	if err != nil {
-		return fmt.Errorf("failed to read from world state: %v", err)
-	}
-	if assetJSON == nil {
-		return fmt.Errorf("the asset %s does not exist", id)
-	}
-
-	//var agent Agent
-	err = json.Unmarshal(assetJSON, &agent)
-	if err != nil {
-		return err
-	}*/
-
-	//return &agent, nil
-
-	//create transactionAgent
-	//time := createTimestamp()
-
-	tAgent := TransactionAgent{
-		TransactionID: id + "." + timestamp,
-		Timestamp:     timestamp,
-		Source:        source,
-		Destination:   destination,
-		Data:          "",
-	}
-
-	//var transactions []TransactionAgent
-	transactions := agent.Transaction
-	//agent.Transaction[0] = tAgent
-	transactions = append(transactions, tAgent)
-	agent.Transaction = transactions
-
-	agentJSON, err := json.Marshal(agent)
-	if err != nil {
-		return err
-	}
-
-	return ctx.GetStub().PutState(id, agentJSON)
-
-}
-
-func (s *SmartContract) AddRatingAgent(ctx contractapi.TransactionContextInterface, id string, trusteeAgentID string, value string, reputation string) error {
-
-	agent, err := s.GetAgent(ctx, id)
-	if err != nil {
-		return err
-	}
-
-	rAgent := Rating{
-		AgentID:    trusteeAgentID,
-		Value:      value,
-		Reputation: reputation,
-	}
-
-	//var transactions []TransactionAgent
-	ratings := agent.Ratings
-	ratings = append(ratings, rAgent)
-	agent.Ratings = ratings
-
-	agentJSON, err := json.Marshal(agent)
-	if err != nil {
-		return err
-	}
-
-	return ctx.GetStub().PutState(id, agentJSON)
-
-}
-
-func (s *SmartContract) UpdateRatingAgent(ctx contractapi.TransactionContextInterface, id string, trusteeAgentID string, value string, reputation string) error {
-
-	agent, err := s.GetAgent(ctx, id)
-	if err != nil {
-		return err
-	}
-
-	//var transactions []TransactionAgent
-	ratings := agent.Ratings
-
-	for i := range ratings {
-		if ratings[i].AgentID == trusteeAgentID {
-			// Found!
-			ratings[i].Value = value
-			ratings[i].Reputation = reputation
-			break
-		}
-	}
-
-	agent.Ratings = ratings
-
-	agentJSON, err := json.Marshal(agent)
-	if err != nil {
-		return err
-	}
-
-	return ctx.GetStub().PutState(id, agentJSON)
-
-}
-
-// GetAllAssets returns all assets found in world state
-func (s *SmartContract) GetAllAgent(ctx contractapi.TransactionContextInterface) ([]*Agent, error) {
-	// range query with empty string for startKey and endKey does an
-	// open-ended query of all assets in the chaincode namespace.
-	resultsIterator, err := ctx.GetStub().GetStateByRange("", "")
-	if err != nil {
-		return nil, err
-	}
-	defer resultsIterator.Close()
-
-	var agents []*Agent
-	for resultsIterator.HasNext() {
-		queryResponse, err := resultsIterator.Next()
-		if err != nil {
-			return nil, err
-		}
-
-		var agent Agent
-		err = json.Unmarshal(queryResponse.Value, &agent)
-		if err != nil {
-			return nil, err
-		}
-		agents = append(agents, &agent)
-	}
-
-	return agents, nil
-}
-
-// InitLedger adds a base set of assets to the ledger
-func (s *SmartContract) InitLedgerMod(ctx contractapi.TransactionContextInterface) error {
-	transactionsAgent := []TransactionAgent{
-		{TransactionID: "111", Timestamp: "3424", Source: "", Destination: "", Data: ""},
-	}
-
-	assets := []Agent{
-		{AgentID: "asset1", DeviceID: "blue", SubcribePath: "5", TrustValue: "Tomoko", Tolerance: "300", Transaction: transactionsAgent},
-		{AgentID: "asset2", DeviceID: "red", SubcribePath: "5", TrustValue: "Brad", Tolerance: "400", Transaction: transactionsAgent},
-		{AgentID: "asset3", DeviceID: "green", SubcribePath: "10", TrustValue: "Jin Soo", Tolerance: "500", Transaction: transactionsAgent},
-		{AgentID: "asset4", DeviceID: "yellow", SubcribePath: "10", TrustValue: "Max", Tolerance: "600", Transaction: transactionsAgent},
-		{AgentID: "asset5", DeviceID: "black", SubcribePath: "15", TrustValue: "Adriana", Tolerance: "700", Transaction: transactionsAgent},
-		{AgentID: "asset6", DeviceID: "white", SubcribePath: "15", TrustValue: "Michel", Tolerance: "800", Transaction: transactionsAgent},
-	}
-
-	for _, asset := range assets {
-		assetJSON, err := json.Marshal(asset)
-		if err != nil {
-			return err
-		}
-
-		err = ctx.GetStub().PutState(asset.AgentID, assetJSON)
-		if err != nil {
-			return fmt.Errorf("failed to put to world state. %v", err)
-		}
-	}
-
-	return nil
-}
-
-// CreateAsset issues a new asset to the world state with given details.
-func (s *SmartContract) CreateAssetMod(ctx contractapi.TransactionContextInterface, agentID string, deviceID string, subcribePath string, trustValue string, appraisedValue string) error {
-	exists, err := s.AssetExists(ctx, agentID)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return fmt.Errorf("the asset %s already exists", agentID)
-	}
-
-	transactionsAgent := []TransactionAgent{
-		{TransactionID: "114", Timestamp: "3424", Source: "", Destination: "", Data: ""},
-	}
-
-	asset := Agent{
-		AgentID:      agentID,
-		DeviceID:     deviceID,
-		SubcribePath: subcribePath,
-		TrustValue:   trustValue,
-		Tolerance:    appraisedValue,
-		Transaction:  transactionsAgent,
-	}
-	assetJSON, err := json.Marshal(asset)
-	if err != nil {
-		return err
-	}
-
-	return ctx.GetStub().PutState(agentID, assetJSON)
-}
-
-// ReadAsset returns the asset stored in the world state with given id.
-func (s *SmartContract) ReadAssetMod(ctx contractapi.TransactionContextInterface, id string) (*Agent, error) {
-	assetJSON, err := ctx.GetStub().GetState(id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read from world state: %v", err)
-	}
-	if assetJSON == nil {
-		return nil, fmt.Errorf("the asset %s does not exist", id)
-	}
-
-	var asset Agent
-	err = json.Unmarshal(assetJSON, &asset)
-	if err != nil {
-		return nil, err
-	}
-
-	return &asset, nil
-}
-
-// InitLedger adds a base set of assets to the ledger
-func (s *SmartContract) InitLedger(ctx contractapi.TransactionContextInterface) error {
-	assets := []Asset{
-		{AgentID: "asset1", DeviceID: "blue", SubcribePath: "5", TrustValue: "Tomoko", AppraisedValue: "300"},
-		{AgentID: "asset2", DeviceID: "red", SubcribePath: "5", TrustValue: "Brad", AppraisedValue: "400"},
-		{AgentID: "asset3", DeviceID: "green", SubcribePath: "10", TrustValue: "Jin Soo", AppraisedValue: "500"},
-		{AgentID: "asset4", DeviceID: "yellow", SubcribePath: "10", TrustValue: "Max", AppraisedValue: "600"},
-		{AgentID: "asset5", DeviceID: "black", SubcribePath: "15", TrustValue: "Adriana", AppraisedValue: "700"},
-		{AgentID: "asset6", DeviceID: "white", SubcribePath: "15", TrustValue: "Michel", AppraisedValue: "800"},
-	}
-
-	for _, asset := range assets {
-		assetJSON, err := json.Marshal(asset)
-		if err != nil {
-			return err
-		}
-
-		err = ctx.GetStub().PutState(asset.AgentID, assetJSON)
-		if err != nil {
-			return fmt.Errorf("failed to put to world state. %v", err)
-		}
-	}
-
-	return nil
-}
-
-// CreateAsset issues a new asset to the world state with given details.
-func (s *SmartContract) CreateAsset(ctx contractapi.TransactionContextInterface, agentID string, deviceID string, subcribePath string, trustValue string, appraisedValue string) error {
-	exists, err := s.AssetExists(ctx, agentID)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return fmt.Errorf("the asset %s already exists", agentID)
-	}
-
-	asset := Asset{
-		AgentID:        agentID,
-		DeviceID:       deviceID,
-		SubcribePath:   subcribePath,
-		TrustValue:     trustValue,
-		AppraisedValue: appraisedValue,
-	}
-	assetJSON, err := json.Marshal(asset)
-	if err != nil {
-		return err
-	}
-
-	return ctx.GetStub().PutState(agentID, assetJSON)
-}
-
-// ReadAsset returns the asset stored in the world state with given id.
-func (s *SmartContract) ReadAsset(ctx contractapi.TransactionContextInterface, id string) (*Asset, error) {
-	assetJSON, err := ctx.GetStub().GetState(id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read from world state: %v", err)
-	}
-	if assetJSON == nil {
-		return nil, fmt.Errorf("the asset %s does not exist", id)
-	}
-
-	var asset Asset
-	err = json.Unmarshal(assetJSON, &asset)
-	if err != nil {
-		return nil, err
-	}
-
-	return &asset, nil
-}
-
-// UpdateAsset updates an existing asset in the world state with provided parameters.
-func (s *SmartContract) UpdateAsset(ctx contractapi.TransactionContextInterface, agentID string, deviceID string, subcribePath string, trustValue string, appraisedValue string) error {
-	exists, err := s.AssetExists(ctx, agentID)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return fmt.Errorf("the asset %s does not exist", agentID)
-	}
-
-	// overwriting original asset with new asset
-	asset := Asset{
-		AgentID:        agentID,
-		DeviceID:       deviceID,
-		SubcribePath:   subcribePath,
-		TrustValue:     trustValue,
-		AppraisedValue: appraisedValue,
-	}
-	assetJSON, err := json.Marshal(asset)
-	if err != nil {
-		return err
-	}
-
-	return ctx.GetStub().PutState(agentID, assetJSON)
-}
-
-// DeleteAsset deletes an given asset from the world state.
-func (s *SmartContract) DeleteAsset(ctx contractapi.TransactionContextInterface, id string) error {
-	exists, err := s.AssetExists(ctx, id)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return fmt.Errorf("the asset %s does not exist", id)
-	}
-
-	return ctx.GetStub().DelState(id)
-}
-
-// AssetExists returns true when asset with given ID exists in world state
-func (s *SmartContract) AssetExists(ctx contractapi.TransactionContextInterface, id string) (bool, error) {
-	assetJSON, err := ctx.GetStub().GetState(id)
-	if err != nil {
-		return false, fmt.Errorf("failed to read from world state: %v", err)
-	}
-
-	return assetJSON != nil, nil
-}
-
-// TransferAsset updates the owner field of asset with given id in world state.
-func (s *SmartContract) TransferAsset(ctx contractapi.TransactionContextInterface, id string, newTrustValue string) error {
-	asset, err := s.ReadAsset(ctx, id)
-	if err != nil {
-		return err
-	}
-
-	asset.TrustValue = newTrustValue
-	assetJSON, err := json.Marshal(asset)
-	if err != nil {
-		return err
-	}
-
-	return ctx.GetStub().PutState(id, assetJSON)
-}
-
-// GetAllAssets returns all assets found in world state
-func (s *SmartContract) GetAllAssets(ctx contractapi.TransactionContextInterface) ([]*Asset, error) {
-	// range query with empty string for startKey and endKey does an
-	// open-ended query of all assets in the chaincode namespace.
-	resultsIterator, err := ctx.GetStub().GetStateByRange("", "")
-	if err != nil {
-		return nil, err
-	}
-	defer resultsIterator.Close()
-
-	var assets []*Asset
-	for resultsIterator.HasNext() {
-		queryResponse, err := resultsIterator.Next()
-		if err != nil {
-			return nil, err
-		}
-
-		var asset Asset
-		err = json.Unmarshal(queryResponse.Value, &asset)
-		if err != nil {
-			return nil, err
-		}
-		assets = append(assets, &asset)
-	}
-
-	return assets, nil
 }
 
 func main() {
